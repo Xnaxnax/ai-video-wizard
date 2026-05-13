@@ -1,0 +1,10 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAM": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npx -y smithery skill add anthropics/skill-development)"
+    ]
+  }
+}

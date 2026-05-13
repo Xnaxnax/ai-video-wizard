@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(FIRECRAWL_API_KEY=\"fc-dc6675478053412bad2438fc3cf766f4\" timeout 5 npx -y firecrawl-mcp)",
+      "Bash(npx -y smithery skill add anthropics/webapp-testing)"
+    ]
+  }
+}

@@ -5,45 +5,33 @@ import type { ProductProfile, PhysicsPlan } from "@/types";
 export class OpenAIScriptProvider implements ScriptProvider {
   name = "openai-chatgpt";
 
-  private async callOpenAI(messages: ChatMessage[], useJson = false, temperature = 0.7) {
-    let lastError: any = null;
-    for (let i = 0; i < 3; i++) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 60_000);
+  private async callOpenAI(messages: ChatMessage[], useJson = false, temperature = 0.7, model = "gpt-4o") {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
 
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o",
-            messages,
-            temperature,
-            response_format: useJson ? { type: "json_object" } : undefined,
-          }),
-          signal: controller.signal,
-        });
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature,
+        response_format: useJson ? { type: "json_object" } : undefined,
+      }),
+      signal: controller.signal,
+    });
 
-        clearTimeout(timeout);
+    clearTimeout(timeout);
 
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.error?.message || "OpenAI error");
-        }
-
-        return response.json();
-      } catch (error: any) {
-        lastError = error;
-        console.warn(`[OpenAI] Attempt ${i + 1} failed:`, error.message);
-        if (i < 2) {
-          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-        }
-      }
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `OpenAI HTTP ${response.status}`);
     }
-    throw lastError;
+
+    return response.json();
   }
 
   async generateScenes(topic: string): Promise<{ scenes: GeneratedScene[]; visualStyle: string }> {
@@ -192,7 +180,7 @@ Output ONLY the action description in English. No markdown, no explanations. Max
     const data = await this.callOpenAI([
       { role: "system", content: "You are a scene action writer. Output only the specific physical action happening in the scene. No character descriptions, no constraints, no camera instructions." },
       { role: "user", content: prompt },
-    ], false, 0.4);
+    ], false, 0.4, "gpt-4o-mini");
 
     return data.choices[0].message.content.trim();
   }
@@ -369,7 +357,7 @@ Product and brand label MUST stay perfectly frozen and sharp. No text warping du
     const data = await this.callOpenAI([
       { role: "system", content: "You are an expert director for AI video animation." },
       { role: "user", content: prompt },
-    ], false, 0.4);
+    ], false, 0.4, "gpt-4o-mini");
 
     return data.choices[0].message.content.trim();
   }
@@ -404,7 +392,7 @@ Output ONLY the voiceover text. No markdown, no explanations.
     const data = await this.callOpenAI([
       { role: "system", content: "You are a professional voiceover writer for short social media videos." },
       { role: "user", content: prompt },
-    ]);
+    ], false, 0.7, "gpt-4o-mini");
 
     return data.choices[0].message.content.trim();
   }

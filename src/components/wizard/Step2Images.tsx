@@ -5,6 +5,10 @@ import type { ProjectData, SceneData } from "@/types";
 import SceneCard from "@/components/ui/SceneCard";
 import { ImageIcon } from "lucide-react";
 
+// Module-level lock — survives React Strict Mode unmount/remount cycles.
+// Once a scene id is here, auto-start will never fire for it again during this page load.
+const sceneInitLock = new Set<string>();
+
 interface Step2Props {
   project: ProjectData;
   scenes: SceneData[];
@@ -27,7 +31,6 @@ export default function Step2Images({
     if (regeneratingIds.has(sceneId)) return;
     setRegeneratingIds((prev) => new Set(prev).add(sceneId));
     try {
-      // We pass feedback to the API which will use GPT-4o to revise the English prompt
       await onRegenerateScene(sceneId, feedback ? JSON.stringify({ action: "image", feedback }) : "image");
     } finally {
       setRegeneratingIds((prev) => {
@@ -38,15 +41,17 @@ export default function Step2Images({
     }
   }, [regeneratingIds, onRegenerateScene]);
 
-  // Автоматический запуск генерации фото для пустых сцен
+  // Auto-start generation once per scene per page load.
+  // sceneInitLock is module-level — survives Strict Mode unmount/remount.
+  // Manual button clicks bypass this lock (call handleRegenerate directly from onClick).
   useEffect(() => {
     scenes.forEach(s => {
-      const isGenerating = regeneratingIds.has(s.id);
-      if (!s.imageUrl && !isGenerating) {
+      if (!s.imageUrl && !sceneInitLock.has(s.id)) {
+        sceneInitLock.add(s.id);
         handleRegenerate(s.id);
       }
     });
-  }, [scenes, regeneratingIds, handleRegenerate]);
+  }, [scenes, handleRegenerate]);
 
   return (
     <div>

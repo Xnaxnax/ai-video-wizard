@@ -15,10 +15,7 @@ import {
 } from "./mock";
 import { OpenAIScriptProvider } from "./openai";
 import { OpenAIImageProvider } from "./openai-image";
-
-// В будущем здесь подключаются реальные провайдеры
-// import { OpenAIScriptProvider } from "./openai";
-// import { NanoBananaImageProvider } from "./nanobanana";
+import { KieNanoBananaProvider } from "./kie-nano-banana";
 
 export function getScriptProvider(): ScriptProvider {
   if (process.env.OPENAI_API_KEY) {
@@ -27,7 +24,13 @@ export function getScriptProvider(): ScriptProvider {
   return new MockScriptProvider();
 }
 
+// Image provider priority:
+//   1. kie.ai Nano Banana Pro (KIE_API_KEY)  — primary, better quality + cheaper
+//   2. OpenAI gpt-image-1.5 (OPENAI_API_KEY) — fallback for legacy projects
 export function getImageProvider(): ImageProvider {
+  if (process.env.KIE_API_KEY) {
+    return new KieNanoBananaProvider();
+  }
   return new OpenAIImageProvider();
 }
 

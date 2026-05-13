@@ -6,8 +6,8 @@ import { planScenePhysics, getFallbackPhysicsPlan } from "@/core/scene-physics";
 import { buildImagePrompt } from "@/core/prompt-builder";
 import { validatePrompt, repairPrompt } from "@/core/prompt-validator";
 import { getOrCreateCharacterReference } from "@/core/character-master";
-import { checkImageQuality, buildQualityRepairPrefix } from "@/core/quality-checker";
 import { extractSceneAction } from "@/core/scene-action-extractor";
+import { detectOverlayPosition, composeProductOnImage } from "@/core/product-compositor";
 import { NextRequest, NextResponse } from "next/server";
 import type { SceneData } from "@/types";
 import type { OpenAIScriptProvider } from "@/core/providers/openai";
@@ -223,12 +223,17 @@ export async function POST(
             ? `${sceneScript}\n\n[SEMANTIC CORRECTION]: ${semanticCorrectionNote}`
             : sceneScript;
 
-          sceneAction = await (scriptProvider as unknown as OpenAIScriptProvider).generateSceneAction(
-            enrichedSceneScript,
-            physicsPlan,
-            resolvedProductProfile
-          );
-          console.log("[Pipeline] sceneAction:", sceneAction);
+          if (sceneActionExtract) {
+            sceneAction = "";
+            console.log("[Pipeline] sceneAction skipped — extract is source of truth");
+          } else {
+            sceneAction = await (scriptProvider as unknown as OpenAIScriptProvider).generateSceneAction(
+              enrichedSceneScript,
+              physicsPlan,
+              resolvedProductProfile
+            );
+            console.log("[Pipeline] sceneAction (fallback, no extract):", sceneAction);
+          }
 
           // --- Step 5: Assemble prompt using SceneActionExtract as source of truth ---
           prompt = buildImagePrompt({
@@ -273,37 +278,65 @@ export async function POST(
         console.log(prompt);
         console.log("[Pipeline] productProfile:", JSON.stringify(resolvedProductProfile));
         console.log("[Pipeline] characterRef:", characterSeedUrl ? "present" : "none");
-        console.log("[Pipeline] productRef:", sceneWithProject.requiresProductImage && projectData.referenceImageUrl ? "present" : "none");
+        console.log("[Pipeline] productRef: NOT passed to Stage 1 (Stage 2 compositor handles product)");
 
-        // --- Step 8: Generate image ---
-        const productRef = sceneWithProject.requiresProductImage
-          ? projectData.referenceImageUrl
-          : undefined;
+        // --- Step 8: Stage 1 — Generate scene with EMPTY hand (no branded product) ---
+        let imageUrl = await imageProvider.generateImage(prompt, undefined, characterSeedUrl);
 
-        let imageUrl = await imageProvider.generateImage(prompt, productRef, characterSeedUrl);
-
-        // --- Step 9: Quality Check ---
-        const qualityResult = await checkImageQuality(imageUrl, prompt, {
-          visualStyle,
-          requiresProductImage: !!sceneWithProject.requiresProductImage,
-          productProfile: resolvedProductProfile,
-          physicsPlan,
-        });
-
-        if (!qualityResult.passed) {
-          console.warn("[Pipeline] Quality check FAILED. Regenerating with repair note...");
-          const repairPrefix = buildQualityRepairPrefix(qualityResult);
-          const repairedPrompt = repairPrefix ? `${repairPrefix} ${prompt}` : prompt;
-          try {
-            imageUrl = await imageProvider.generateImage(repairedPrompt, productRef, characterSeedUrl);
-            console.log("[Pipeline] Regenerated after quality failure");
-          } catch (regenError: any) {
-            console.error("[Pipeline] Regeneration failed, using original:", regenError.message);
-            // Keep the original imageUrl if regeneration fails
-          }
+        // DEBUG: save Stage 1 intermediate for magenta inspection
+        if (process.env.NODE_ENV !== "production" && imageUrl.startsWith("data:")) {
+          const _fs = require("fs");
+          _fs.writeFileSync(
+            require("path").join(process.cwd(), "debug_stage1_output.png"),
+            Buffer.from(imageUrl.split(",")[1], "base64")
+          );
+          console.log("[Pipeline][DEBUG] Stage 1 image saved to debug_stage1_output.png");
         }
 
-        // --- Step 9: Generate animation prompt ---
+        // --- Step 9b: Stage 2 — Product Compositor (overlay original product PNG) ---
+        const needsProductOverlay = (() => {
+          if (sceneActionExtract) {
+            return sceneActionExtract.product_visibility !== "none";
+          }
+          return !!sceneWithProject.requiresProductImage;
+        })();
+
+        let productCompositorApplied = false;
+        if (needsProductOverlay) {
+          if (!projectData.referenceImageUrl) {
+            throw new Error(
+              "[Stage 2 Compositor] FAILED: scene requires product overlay but project.referenceImageUrl is missing."
+            );
+          }
+          console.log("[Pipeline] === STAGE 2: PRODUCT COMPOSITOR ===");
+          const productHint = (() => {
+            const geo = resolvedProductProfile?.geometry;
+            if (geo) {
+              const size = geo.aspect_ratio
+                ? `${geo.aspect_ratio.height_class} ${geo.aspect_ratio.width_class} `
+                : "";
+              return `${size}${geo.product_family} (${geo.shape_class}) made of ${geo.material_type}`;
+            }
+            return resolvedProductProfile?.container_form || "product bottle";
+          })();
+          const position = await detectOverlayPosition(imageUrl, productHint);
+          if (!position) {
+            throw new Error(
+              "[Stage 2 Compositor] FAILED: could not detect placeholder bottle. Stage 1 did not produce a usable placeholder."
+            );
+          }
+          imageUrl = await composeProductOnImage(imageUrl, projectData.referenceImageUrl, position);
+          productCompositorApplied = true;
+          console.log("[Pipeline] Stage 2 compositor applied. productCompositorApplied=true");
+        }
+
+        if (needsProductOverlay && !productCompositorApplied) {
+          throw new Error(
+            "[Stage 2 Compositor] FAILED: scene requires product but compositor did not run."
+          );
+        }
+
+        // --- Step 10: Generate animation prompt ---
         const animationPrompt = await scriptProvider.generateAnimationPrompt(sceneScript, prompt);
 
         // Extract Speech from animation prompt for voiceover

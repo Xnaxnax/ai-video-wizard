@@ -74,16 +74,15 @@ export function buildImagePrompt(input: PromptBuildInput): string {
     }
   }
 
-  // === F. Product lock — ONLY if product_visibility demands it ===
+  // === F. Placeholder product (Stage 2 compositor will REPLACE it with original PNG) ===
   const productVisible = sceneActionExtract
-    ? (sceneActionExtract.product_visibility === "showcase" || sceneActionExtract.product_visibility === "application")
+    ? sceneActionExtract.product_visibility !== "none"
     : requiresProductImage;
 
-  if (productVisible && productProfile) {
-    blocks.push(buildProductLock(
-      productProfile,
+  if (productVisible) {
+    blocks.push(buildPlaceholderProductBlock(
       physicsPlan,
-      sceneActionExtract?.product_visibility
+      sceneActionExtract,
     ));
   }
 
@@ -151,165 +150,55 @@ function buildLiteralActionBlock(extract: SceneActionExtract): string {
   return parts.filter(Boolean).join(" ");
 }
 
-function buildProductLock(
-  productProfile: ProductProfile,
-  physicsPlan?: PhysicsPlan | null,
-  productVisibility?: string | null
-): string {
-  const actionMode =
-    productVisibility === "application"
-      ? (physicsPlan?.product_interaction || "pour")
-      : "showcase";
-
-  const geo = productProfile.geometry;
-
-  // === Build dynamic shape description from geometry (NO hardcode) ===
-  const shapeDesc = buildGeometryDescription(productProfile);
-
-  const baseRules = [
-    `PRODUCT (must match reference image exactly):`,
-    `Use the exact same product from the product reference image.`,
-    `This product is: ${shapeDesc}`,
-    `Keep exact same product family (${geo?.product_family || productProfile.product_type}).`,
-    `Keep same shape class (${geo?.shape_class || "as seen in reference"}).`,
-    `Keep same material (${productProfile.material}).`,
-    `Keep same label area and main design.`,
-    `${productProfile.scale_logic}.`,
-  ];
-
-  // Structural feature constraints from geometry
-  if (geo) {
-    if (!geo.structural_features.has_handle) {
-      baseRules.push("No carrying handle — this product has no handle.");
-    }
-    if (!geo.structural_features.has_trigger) {
-      baseRules.push("No spray trigger — this product has no trigger mechanism.");
-    }
-    if (geo.rigidity === "rigid") {
-      baseRules.push("Product shape is rigid — do not bend, deform, or distort it.");
-    }
-    if (geo.rigidity === "flexible") {
-      baseRules.push("Product is flexible — natural folds only, do not make it rigid.");
-    }
-    if (geo.structural_features.has_trigger) {
-      baseRules.push("Preserve the spray trigger mechanism.");
-    }
-  }
-
-  const actionRules = buildProductActionRules(actionMode, productProfile);
-
-  // Geometry-derived forbidden transformations
-  const geoForbidden = (geo?.forbidden_transformations ?? [])
-    .map(r => r.charAt(0).toUpperCase() + r.slice(1) + ".")
-    .join(" ");
-
-  // Physical wrong_transformations from product profile
-  const physForbidden = (productProfile.wrong_transformations ?? [])
-    .map(r => r.charAt(0).toUpperCase() + r.slice(1) + ".")
-    .join(" ");
-
-  return [...baseRules, actionRules, geoForbidden, physForbidden].filter(Boolean).join(" ");
-}
-
 /**
- * Builds a human-readable product shape description from geometry profile.
- * No hardcode — everything comes from the analyzed geometry.
+ * Builds the Stage 1 instruction for a GENERIC PLACEHOLDER BOTTLE.
+ *
+ * Stage 1 renders an unbranded placeholder positioned and oriented naturally
+ * for the action. Stage 2 (product-compositor) will REPLACE the placeholder
+ * with the original product PNG using the placeholder's bbox + rotation.
+ *
+ * Universal — works for any interaction type (showcase, pouring, holding,
+ * pointing, sitting with bottle, walking, two-hand-hold, side-hold, etc.).
+ * The model derives the natural pose from the action description.
  */
-function buildGeometryDescription(productProfile: ProductProfile): string {
-  const geo = productProfile.geometry;
-  if (!geo) return productProfile.container_form;
-
-  const parts: string[] = [];
-
-  // Size from aspect ratio
-  if (geo.aspect_ratio) {
-    const h = geo.aspect_ratio.height_class; // short | medium | tall
-    const w = geo.aspect_ratio.width_class;  // narrow | medium | wide
-    parts.push(`${h} ${w} ${geo.product_family}`);
-  } else {
-    parts.push(geo.product_family);
-  }
-
-  // Shape class modifier
-  if (geo.shape_class !== "other") {
-    parts.push(`(${geo.shape_class} shape)`);
-  }
-
-  // Material
-  parts.push(`made of ${geo.material_type}`);
-
-  // Key structural features
-  const features: string[] = [];
-  if (geo.structural_features.has_trigger) features.push("with trigger sprayer");
-  if (geo.structural_features.has_spout) features.push("with spout/opening");
-  if (geo.structural_features.has_cap) features.push("with cap");
-  if (geo.structural_features.has_zipper) features.push("with zipper");
-  if (geo.structural_features.has_sleeves) features.push("with sleeves");
-  if (geo.structural_features.has_legs) features.push("with legs/pants");
-  if (features.length) parts.push(features.join(", "));
-
-  return parts.join(" ");
-}
-
-
-function buildProductActionRules(
-  actionMode: string,
-  productProfile: ProductProfile
+function buildPlaceholderProductBlock(
+  physicsPlan?: PhysicsPlan | null,
+  sceneActionExtract?: SceneActionExtract | null,
 ): string {
-  switch (actionMode) {
-    case "showcase":
-      return [
-        `Product is held upright or naturally toward camera.`,
-        `${productProfile.grip_logic}.`,
-        "Label area clearly visible.",
-      ].join(" ");
+  const action = sceneActionExtract?.primary_action ?? "interacting with the bottle";
+  const handState = sceneActionExtract?.hand_state ?? "holding product";
+  const bodyPose = sceneActionExtract?.body_pose ?? "standing";
+  const orientation = physicsPlan?.product_orientation ?? "naturally oriented in the grip";
+  const interaction = physicsPlan?.product_interaction ?? "";
 
-    case "pour":
-      return [
-        `Product is tilted naturally for pouring.`,
-        `${productProfile.opening_logic}.`,
-        `${productProfile.grip_logic}.`,
-        "Cap is removed or opening is active.",
-        "Liquid or powder exits ONLY from the correct opening, not from the cap, side, or corner.",
-        "Product scale stays proportional and realistic.",
-        "Label may be partially visible but not redesigned.",
-      ].join(" ");
+  const interactionHint = interaction
+    ? `Interaction type: ${interaction}. The bottle pose must match this interaction.`
+    : "";
 
-    case "spray":
-      return [
-        `Product nozzle points toward the intended target.`,
-        "Finger is on trigger.",
-        `${productProfile.opening_logic}.`,
-        `${productProfile.grip_logic}.`,
-        "Spray exits ONLY from the nozzle.",
-        "Bottle remains realistic handheld size.",
-      ].join(" ");
-
-    case "powder_pour":
-      return [
-        `Packet or container is open or torn.`,
-        `${productProfile.opening_logic}.`,
-        "Powder exits ONLY from the opening.",
-        "Do not transform packet into a bottle or box.",
-      ].join(" ");
-
-    case "wear":
-      return [
-        "Clothing or wearable item is worn on the human body.",
-        "Garment conforms to body shape naturally.",
-        "Do not transform clothing into another garment type.",
-      ].join(" ");
-
-    default:
-      return [
-        `Product is held naturally in hand.`,
-        `${productProfile.grip_logic}.`,
-        "Product scale is realistic relative to human hand.",
-      ].join(" ");
-  }
+  return [
+    "PLACEHOLDER PRODUCT (Stage 2 compositor REPLACES this with the original product PNG):",
+    `Render a placeholder bottle in the scene, positioned and oriented for the action: ${action}.`,
+    `Body pose: ${bodyPose}. Hand state: ${handState}. Bottle orientation: ${orientation}.`,
+    interactionHint,
+    "The placeholder bottle MUST be:",
+    "- A simple cylindrical bottle with a cap.",
+    "- COLORED IN BRIGHT PURE MAGENTA (RGB 255,0,255 — vivid hot pink/fuchsia). The ENTIRE bottle including the cap must be uniformly bright magenta. This unusual color is REQUIRED so the compositor can detect and replace it.",
+    "- Realistic proportions for a small handheld bottle (approximately 250 ml — tall slim form, height ~2.5x width).",
+    "- ABSOLUTELY NO text, NO labels, NO logos, NO brand names, NO writing of any kind on the bottle.",
+    "- A single solid uniform magenta surface — no decals, no stickers, no patterns, no gradients, no shading variations on the bottle's color.",
+    "Hand grip: realistic fingers wrapping naturally around the bottle, contact points visible, no floating.",
+    "Bottle scale: clearly proportional to the human hand and the frame — clearly resolvable, not tiny.",
+    "Bottle position: naturally placed for the action so the composition reads correctly.",
+    "Lighting on the bottle must match the scene lighting (same direction and intensity), but the bottle's BASE color must remain bright magenta everywhere — no white highlights desaturating it to pink, no shadows turning it black; keep the magenta saturation strong throughout.",
+    "Important: ONLY the bottle is magenta. Do NOT paint anything else in the scene magenta. The character, clothes, background, and all other objects must keep their natural colors.",
+  ].filter(Boolean).join(" ");
 }
 
 function buildPhysicsLock(physicsPlan: PhysicsPlan, productVisible: boolean): string {
+  // productVisible no longer implies product-orientation instruction —
+  // Stage 1 does not render the product. Stage 2 compositor overlays it.
+  void productVisible;
+
   const parts: string[] = ["PHYSICS:"];
 
   if ((physicsPlan.action_physics ?? []).length > 0) {
@@ -318,10 +207,6 @@ function buildPhysicsLock(physicsPlan: PhysicsPlan, productVisible: boolean): st
 
   if (physicsPlan.human_pose) {
     parts.push(`Human pose: ${physicsPlan.human_pose}.`);
-  }
-
-  if (productVisible && physicsPlan.product_orientation) {
-    parts.push(`Product orientation: ${physicsPlan.product_orientation}.`);
   }
 
   return parts.join(" ");
@@ -342,6 +227,8 @@ function buildNegativeConstraints(
   productProfile: ProductProfile | null | undefined,
   productVisible: boolean
 ): string {
+  void productProfile;
+
   const constraints = [
     "STRICT RULES \u2014 do not violate:",
     "No extra people in frame.",
@@ -357,24 +244,16 @@ function buildNegativeConstraints(
     "Do not invent actions not present in the scene description.",
   ];
 
-  if (productVisible && productProfile) {
+  if (productVisible) {
     constraints.push(
-      "No product category change.",
-      "No product scale distortion or oversized product.",
-      "No added handles unless visible in reference.",
-      "No label redesign or label text change.",
-      "No transformation of product into different container type.",
-      "No liquid, powder, or spray from wrong part of product.",
-      "No liquid from closed cap.",
-      ...(productProfile.wrong_transformations ?? []).map(t => `No ${t.replace(/^do not /i, "")}.`),
+      "The bottle in this image is a GENERIC PLACEHOLDER \u2014 render it WITHOUT any text, labels, logos, brand names, decals, stickers, patterns, or readable writing of any kind.",
+      "The placeholder bottle must be a solid uniform-color surface (off-white or light grey).",
+      "Do NOT recreate, imagine, or invent any branded product label or text.",
     );
-  }
-
-  if (!productVisible) {
+  } else {
     constraints.push(
-      "No product bottle or container in this scene.",
-      "No liquid pouring in this scene.",
-      "No product-like objects in hands unless specified.",
+      "No bottles, containers, products, or product-like objects in hands.",
+      "No liquid pouring, spraying, or applying.",
     );
   }
 

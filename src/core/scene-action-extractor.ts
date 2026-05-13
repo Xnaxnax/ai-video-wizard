@@ -119,12 +119,12 @@ export async function extractSceneAction(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: buildExtractorPrompt(sceneScript, brief, productProfile) },
         ],
-        temperature: 0.1, // Maximum determinism — this must be literal
+        temperature: 0.1,
         max_tokens: 400,
         response_format: { type: "json_object" },
       }),

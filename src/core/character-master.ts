@@ -6,39 +6,50 @@
 import type { ProjectRecord } from "@/lib/store";
 import { store } from "@/lib/store";
 
+// In-flight generation lock per project — prevents parallel scenes from each
+// triggering their own character reference generation when project.characterReferenceImageUrl is null.
+const inFlightCharRef = new Map<string, Promise<string | undefined>>();
+
 /**
  * Returns the stable character reference URL for the project.
  * If it doesn't exist yet, generates a master character image and saves it.
+ * Parallel callers for the same project share a single in-flight Promise.
  */
 export async function getOrCreateCharacterReference(
   project: ProjectRecord,
   generateImageFn: (prompt: string) => Promise<string>
 ): Promise<string | undefined> {
-  // Already have a stable master reference — use it
   if (project.characterReferenceImageUrl) {
     console.log(`[CharacterMaster] Using existing characterReferenceImageUrl for project ${project.id}`);
     return project.characterReferenceImageUrl;
   }
 
-  // No master yet — generate one
+  const existing = inFlightCharRef.get(project.id);
+  if (existing) {
+    console.log(`[CharacterMaster] Awaiting in-flight character generation for project ${project.id}`);
+    return existing;
+  }
+
   console.log(`[CharacterMaster] No master reference found. Generating master character image for project ${project.id}...`);
-
   const style = project.visualStyle || "A person standing in a natural outdoor setting";
-
   const masterPrompt = buildMasterCharacterPrompt(style);
 
-  try {
-    const imageUrl = await generateImageFn(masterPrompt);
+  const promise = (async () => {
+    try {
+      const imageUrl = await generateImageFn(masterPrompt);
+      store.updateProject(project.id, { characterReferenceImageUrl: imageUrl });
+      console.log(`[CharacterMaster] Master character image created and saved for project ${project.id}`);
+      return imageUrl;
+    } catch (e: any) {
+      console.error(`[CharacterMaster] Failed to generate master character image:`, e.message);
+      return undefined;
+    } finally {
+      inFlightCharRef.delete(project.id);
+    }
+  })();
 
-    // Persist to project
-    store.updateProject(project.id, { characterReferenceImageUrl: imageUrl });
-    console.log(`[CharacterMaster] Master character image created and saved for project ${project.id}`);
-
-    return imageUrl;
-  } catch (e: any) {
-    console.error(`[CharacterMaster] Failed to generate master character image:`, e.message);
-    return undefined;
-  }
+  inFlightCharRef.set(project.id, promise);
+  return promise;
 }
 
 /**

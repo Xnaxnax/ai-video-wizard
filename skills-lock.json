@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "skills": {
+    "Skill Development": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "8d262f08f33825947ea20204ebf5101e36056c98090251bd973a552ec8ef0c0c"
+    },
+    "anthropic-prompt-engineer": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "82e2021590582a5073467ea50879c272ce97c5dee28e4fe93ed5b9392862b3a7"
+    },
+    "frontend-design": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "e8118284a6365753790d44bb2758a6032b3af27fa84696428d9233f2be0f4e78"
+    },
+    "refactor": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "87789a786b96f99ba0680e89345a975106e10e7db1071c7cdc2e76d507c449d6"
+    },
+    "skill-creator": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "5ea13a6d9f0d4bb694405d79acd00cadec0d21bb138c4dd10fcf3c500cb835c2"
+    },
+    "web-design-reviewer": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "10c6fad8b4f01dbeae969009d81d6c306c8a96d56077cad9bfe2a73a38f5dcbe"
+    },
+    "webapp-testing": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "ad5b1fc52807e9afa4635e59218a026b164dc58b6c3f41b0f7c644dcd6ccf572"
+    }
+  }
+}
